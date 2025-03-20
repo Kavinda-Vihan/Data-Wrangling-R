@@ -1,0 +1,481 @@
+---
+title: "Data Wrangling (Data Preprocessing)"
+author: "Kavinda Vihan Goonesekere"
+subtitle: Practical Assessment 2
+date: "26-05-2023"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+  html_notebook: default
+editor_options: 
+  chunk_output_type: inline
+---
+
+
+## **Setup**
+
+```{r warning=FALSE, message=FALSE}
+
+# Load the necessary packages required to reproduce the report. For example:
+
+library(kableExtra)
+library(editrules)
+library(magrittr)
+library(stringr)
+library(ggplot2)
+library(ggpubr)
+library(dplyr)
+library(tidyr)
+
+```
+
+
+## **Student names, numbers and percentage of contributions**
+```{r, echo=FALSE}
+
+# Add your names, numbers and percentage of your contribution here.
+
+na<- c("Kavinda Vihan Goonesekere")
+no<- c("S3987368")
+pc<- c("100%")
+
+s<- data.frame(cbind(na,no,pc))
+colnames(s)<- c("**Student name**", "**Student number**", "**Percentage of contribution**")
+
+s %>% kbl(caption = "**Group Information**") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+
+```
+<br>
+<br>
+
+## **Executive Summary**
+
+The pre-processing performed in this report attempts to combine **mortality**, a dataset containing death rate estimates for various causes of death by US state, and **county_data**, a dataset containing socioeconomic variables for all the US counties. This requires the following pre-processing steps:
+
+* Performing the relevant type conversions and converting categorical variables to factors/ordered factors
+* Verifying the way time periods in **mortality** are defined and using it to justify filtering **mortality** to 12-month aggregate records only.
+* Filtering **mortality** to only crude death rates (instead of age adjusted) within 2019
+* Removing NULL values from both **mortality** and **county_data**
+* Correctly applying summary functions to **county_data** and group by state to make data less granular
+* Pivoting gender and state columns in **mortality** to single columns
+* Removing unnecessary columns from **mortality** after pre-processing
+* Pivoting gender and ethnicity columns in **county_data** to single columns
+* Fix string columns in both **county_data** and **mortality**
+* Creating percentage columns for employed and gender population variables in **county_data**
+* Scaling percentage values from 0-100 to 0-1
+* Joining **county_data** and **mortality** on their common columns
+* Retaining only complete cases from the merged dataframe
+* Checking for rule violations from a preset rule list
+* Plotting boxplots to identify outliers and removing any, if necessary
+* Transforming right-skewed population data to resemble a normal distribution by using the _ln()_ transformation
+
+<br>
+<br>
+
+## **Data**
+
+The data pre-processing conducted in this report attempts to combine socioeconomic factors such as income, poverty rates, and ethnicity with the death rate estimates for the 15 leading causes of death in the US by state. This should hopefully provide a clearer picture as to whether there is a correlation between the above factors and various causes of death across US states. The creation of this dataset requires the two datasets listed below:
+
+* **NCHS - VSRR Quarterly provisional estimates for selected indicators of mortality** \
+  This dataset, originally sourced from Healthdata.gov, contains provisional estimates of death for the 15 leading       causes of death in the United States (Centers for Disease Control and Prevention, 2016). In addition to these,         estimates are given for deaths caused by drug overdoses, falls (for those aged 65 and above), HIV, homicide, and       deaths related to firearms. Estimates are given from 2019 Quarter 1 till 2022 Quarter 3. The variables in this         dataset are discussed below:
+
+  **Year and Quarter**: Contains the year and quarter for which the estimate is valid (eg: "2019 Q1")\
+  **Time Period**: The time period over which the estimate is valid\
+  **Cause of Death**: The cause of death for the given estimate\
+  **Rate Type**: One of two categories, "Crude" for which estimates are further broken down into age groups, and "Age    adjusted" for which there is no additional breakdown by age\
+  **Unit**: Unit for estimates (all estimates are given as "Deaths per 100,000")\
+  **Overall Rate**: Overall estimate for death rate\
+  **Rate Sex Female**: Death rate estimate for females\
+  **Rate Sex Male**: Death rate estimate for males\
+  **Rate Age 1-4 → Rate Age 85 plus**: 10 columns, each of which breaks down death rate estimates across 10 age ranges.   Contains NULL if "Rate Type" column is "Age adjusted"\
+  **Rate Alaska → Rate Wyoming**: 51 columns, each of which breaks down death rate estimates across the 51 US states\
+
+* **ACS county data**: \
+  This dataset, sourced from the American Community Survey (ACS), contains county-level data on various demographics     such as gender and ethnicity, along with information on income, occupation, unemployment, and poverty for the year     2017 (MuonNeutrino, 2019). Since the objective of the dataset is to correlate death rates with socioeconomic indicators, variables    related to personal transportation methods and occupation types were dropped in favour of variables related to    gender, ethnicity, poverty, and unemployment rates. The variables selected from this dataset are discussed    below:\
+
+  **CountyId**: FIP code for US county\
+  **State**:  Name of US state for the specified county\
+  **County**: Name of US county\
+  **TotalPop**: Total population of county\
+  **Men**: Total population of men in county\
+  **Women**: Total population of women in county\
+  **White**: Percentage of county population that is white\
+  **Black**: Percentage of county population that is black\
+  **Native**: Percentage of county population that is native american\
+  **Asian**: Percentage of county population that is asian\
+  **Pacific**: Percentage of county population that is pacific islander\
+  **Income**: Average income for county\
+  **Poverty**: Percentage of county population that is in poverty\
+  **ChildPoverty**: Percentage of children in county experiencing poverty\
+  **Employed**: Total population of county that is employed\
+  **Unemployment**: Percentage of county population that is unemployed\
+
+
+
+```{r}
+
+# Import the data, provide your R codes here.
+
+setwd("C:/Work/Master in Analytics/Semester 1/Data Wrangling MATH2349/Assessment 2")
+
+getwd()
+mortality <- read.csv("indicators_of_mortality.csv", )
+county_data <- read.csv("acs2017_county_data.csv")[ ,c('CountyId', 'State', 'County', 'TotalPop', 'Men', 'Women', 'White', 'Black', 'Native', 'Asian', 'Pacific', 'Income', 'Poverty', 'ChildPoverty', 'Employed', 'Unemployment')]
+
+# glance at data
+head(mortality)
+head(county_data)
+
+```
+<br>
+<br>
+
+## **Understand** 
+
+Checking the structure of **mortality** shows that the categorical variables are read in as character columns and all the death rates are read as numeric. The categorical variables are identified and converted to factors in the subsequent step. The numeric type is suitable for death rates since they are all decimal values.
+
+Checking the structure of **county_data** shows that the **CountyId** is read as an integer while **State** and **County** are read in as character. All three are subsequently converted to factors since they represent categorical variables. **TotalPop**, **Men**, **Women**, **Income**, and **Employed** are read in as integers, which is a suitable format since these columns all contain whole numbers. Additionally, the remaining columns are read as numeric which is suitable once again, as they are all decimal values representing percentages.
+
+```{r}
+
+# check structure
+str(mortality)
+str(county_data)
+
+# identifying categorical variables and converting to factor
+mortality_factors <- c('Time.Period', 'Cause.of.Death', 'Rate.Type', 'Unit')
+county_factors <- c('CountyId', 'State', 'County')
+mortality[mortality_factors] <- lapply(mortality[mortality_factors], factor) 
+county_data[county_factors] <- lapply(county_data[county_factors], factor) 
+
+# create ordered factor from 'Year and Quarter'
+mortality$Year.and.Quarter <- ordered(mortality$Year.and.Quarter, levels =c('2019 Q1', '2019 Q2', '2019 Q3', '2019 Q4', '2020 Q1', '2020 Q2', '2020 Q3', '2020 Q4', '2021 Q1', '2021 Q2', '2021 Q3', '2021 Q4', '2022 Q1', '2022 Q2', '2022 Q3'))
+
+# check factor conversions
+lapply(mortality[mortality_factors], class) 
+lapply(county_data[county_factors], class) 
+
+# create year column
+mortality %<>% mutate(., year = as.integer(substr(Year.and.Quarter, 1, 4)))
+
+```
+Looking at the **Time Period** column, it is observed that there are two possible values: "3-month period" and "12 months ending with quarter". This implies that a row where **Time Period** = "12 months ending with quarter" is simply an aggregate (mean) of the 4 quarters that came before where **Time Period** = "3-month period". For example, the death rate of 2021 Q4 where **Time Period** = "12 months ending with quarter" is the mean of the death rates of 2021 Q1, 2021 Q2, 2021 Q3, and 2021 Q4 where **Time Period** = "3-month period". If this is the case, it is possible to remove all instances of "3-month period" since this level of granularity is unnecessary for the final dataset. To confirm that this is true, the end-of-year crude death rates for **Cause of Death** = "All causes" are compared to their calculated equivalents as follows:
+
+```{r}
+
+# confirming that the '12 months ending with quarter' time period is aggregated from '3-month period' 
+
+# only checking for crude death rates from all causes
+mortality.filtered <- filter(mortality, mortality$Rate.Type == 'Crude' & mortality$Cause.of.Death == 'All causes')
+
+# subsetting the original '12 months ending with quarter' data for comparison
+twelve.months <- filter(mortality.filtered, mortality.filtered$Time.Period == '12 months ending with quarter' & str_detect(Year.and.Quarter, "Q4")) %>% select(., Year.and.Quarter, Overall.Rate)
+
+# calculating mean of all '3-month period' records by year
+calculated <- mortality.filtered %>% 
+              filter(., mortality.filtered$Time.Period == '3-month period' & year != 2022) %>%
+              group_by(year) %>%
+              summarise_at(vars(Overall.Rate), list(calculated = mean))
+
+s <- data.frame(cbind(calculated, twelve.months$Overall.Rate))
+colnames(s) <- c("**Year**", "**Calculated Rate**", "**Rate From Data**")
+
+s %>% kbl(caption = "**Comparison of calculated vs original death rate**") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+
+```
+From the above, we can confirm that instances of **Time Period** = "12 months ending with quarter" are actually aggregates of the previous 4 quarters where **Time Period** = "3-month period". Therefore, instances of **Time Period** = "3-month period" are removed to simplify the dataset.
+
+Later on in the "Tidy & Manipulate Data I" section, we drop the age range columns, which removes the need for age adjusted values in the dataset. To account for this, records where **Rate Type** is "Age adjusted" are removed. In addition, the dataset is further filtered to retain only records from 2019 Q4 since not all the quarters are necessary for the final dataset to be analyzed. 
+
+```{r}
+
+mortality %<>% filter(., mortality$Time.Period != '3-month period')
+mortality %<>% filter(., mortality$Rate.Type != 'Age-adjusted')
+mortality %<>% filter(., mortality$Year.and.Quarter == '2019 Q4')
+
+```
+The summaries for mortality and county data provide a picture of the variables by producing summary statistics for each column (the output for _summary(mortality)_ is trimmed since the dataframe is quite large and the output takes up too much space).
+
+Checking NULL counts for **mortality** shows that the columns which denote death rates by age to be the ones with the most NULLs. This is to be expected since these columns are meant to be NULL when **Rate Type** is "Age adjusted". The other NULLs seen in the columns with death rates for the 51 states implies that data is unavailable for certain causes of death within certain periods in certain states. **Overall Rate** is observed to have a single NULL value which can be removed.    
+
+Checking NULL counts for **county_data** shows that the only **ChildPoverty** has a single NULL field. This record is also filtered out.
+
+```{r}
+
+# check summaries (trimmed output)
+output <- capture.output(summary(mortality))
+output[1:20]
+
+summary(county_data)
+
+# check NULL counts
+colSums(is.na(mortality))
+colSums(is.na(county_data))
+
+mortality %<>% filter(., !is.na(.$Overall.Rate))
+county_data %<>% filter(., !is.na(.$ChildPoverty))
+
+```
+<br>
+<br>
+
+## **Pre-processing Prior to Join** 
+
+An issue to address prior to joining the two datasets is the fact that **county_data** contains statistics at the county-level while **mortality** contains data at the state-level. Combining these datasets as-is on the state column will produce misleading county-level statistics for death rates. As a result, **county_data** must be aggregated to the state-level before combining the two datasets.
+
+The aggregations performed depends on the column being aggregated. Since **TotalPop**, **Men**, **Women**, and **Employed** describe totals, they must be summed when grouping by state. In contrast, **White**, **Black**, **Native**, **Asian**, **Pacific**, **Poverty**, **ChildPoverty**, and **Unemployment** represent percentages and should therefore be averaged when grouping by state. Similarly, **Income** represents a mean for a particular county and therefore must be averaged when finding the mean income by state. The aggregations discussed above are performed as follows:
+
+```{r}
+
+# selectively aggregating specific columns with specific functions when grouping by state
+county_data <- county_data[,-1] %>%
+  group_by(State) %>%
+  summarise(across(.cols = c(TotalPop, Men, Women, Employed), .fns = sum), 
+            across(.cols = c(White, Black, Native, Asian, Pacific, Income, Poverty, ChildPoverty, Unemployment), .fns = mean))
+
+```
+<br>
+<br>
+
+##	**Tidy & Manipulate Data I **
+
+The **mortality** dataset does not conform to tidy data principles as three variables are spread out over multiple columns instead of having their own distinct column. These three variables are as follows:
+
+* **Rate Sex Female & Rate Sex Male**: These can be combined into a single variable called **gender**
+* **Rate Age 1-4 → Rate Age 85 plus**: These can be combined into a single variable called **age.range**
+* **Rate Alaska → Rate Wyoming**: These can be combined into a single variable called **state**
+
+Since age information contains many NULLs, these columns are not pivoted as this would result in many rows with NULL values. The remaining columns are made to comply to tidy principles by using the _pivot_longer()_ function as follows:
+
+```{r}
+
+# pivot longer on gender columns
+mortality %<>%
+  pivot_longer(
+    cols = c(7:8),
+    names_to = 'gender',
+    values_to = 'gender.rate'
+  )
+
+# removing unnecessary age range columns
+mortality <- mortality[,-7:-16]
+
+# pivot longer on state columns
+mortality %<>%
+  pivot_longer(
+    cols = c(7:57),
+    names_to = 'State',
+    values_to = 'state.rate'
+  )
+
+# cleaning up 'gender' and 'age.range' using str_replace_all
+mortality$gender %<>% str_replace_all(., c('Rate.Sex.Female' = 'Female', 'Rate.Sex.Male' = 'Male'))
+
+# fix 'state' column
+mortality$State %<>% substring(., 6)
+mortality$State %<>% gsub('\\.', ' ', .)
+
+```
+Once the gender and state columns are all combined into a single column called **gender** and **State** and the age range columns are removed, the **Overall Rate** column loses its meaning as it is defined as the combined rate over states, genders, and ages. Therefore, this column is removed from **mortality**, along with other unnecessary columns with redundant information.
+
+```{r}
+
+# removing 'Overall Rate' and other unnecessary columns
+mortality <- mortality[,-c(2, 4, 6, 7)]
+
+```
+
+Similarly, the **county_data** dataset also does not conform to tidy data principles as two variables are spread out over multiple columns instead of having their own distinct column. These two variables are as follows:
+
+* **Men and Women**: These can be combined into a single variable called **gender**
+* **Hispanic → Pacific**: These 6 columns can be combined into a single variable called **ethnicity**
+
+The above columns are made to comply to tidy principles by using the _pivot_longer()_ function as follows:
+```{r}
+
+# pivot longer on gender columns
+county_data %<>%
+  pivot_longer(
+    cols = c(3:4),
+    names_to = 'gender',
+    values_to = 'gender.pop'
+  )
+
+# pivot longer on ethnicity columns
+county_data %<>% 
+  pivot_longer(
+    cols = c(4:8),
+    names_to = 'ethnicity',
+    values_to = 'ethnicity.pct'
+  )
+
+# change 'gender' column to be the same as the 'gender' column of 'mortality' 
+county_data$gender %<>% str_replace_all(., c('Men' = 'Male', 'Women' = 'Female'))
+
+```
+<br>
+<br>
+
+## **Tidy & Manipulate Data II** 
+
+In **county_data**, most variables are expressed as a percentage of the population. The variables that are not expressed as a percentage of the total are **Employed** and **gender.pop**. New columns can be created to express these values as a percentage of total population by dividing by the **TotalPop** column.
+
+```{r}
+
+# Creating percentage columns for 'Employed' and 'gender.pop' 
+county_data %<>% 
+  mutate(., employed.pct = Employed/TotalPop, gender.pct = gender.pop/TotalPop)
+
+```
+
+In addition, the existing columns denoting percentages are divided by 100 so that they range between 0 and 1. This would make any future calculations easier to perform.
+
+```{r}
+
+# Dividing percentage columns by 100 to range between 0 and 1
+county_data %<>%
+  mutate(
+    across(c(5:7, 11),
+           .fns = ~./100))
+
+```
+
+<br>
+<br>
+
+## **Joining mortality and county_data**
+
+At this point, the **mortality** and **county_data** are in a suitable condition to be combined into a single dataset. Since both datasets contain two common columns (**State** and **gender**), the merge is performed on both columns. It is important to note that the final dataset is still not fully compliant with tidy data principles since each observation does not have a single row. However, due to the structure of this dataset, no further action can be taken without removing information from the dataset.
+
+```{r}
+
+merged <- merge(mortality, county_data, by = c('State','gender'))
+merged
+
+```
+
+##	**Scan I **
+
+Checking NULL counts again after the datasets are combined reveals that only **state.rate** contains NULL values, which are artifacts of the original **mortality** dataset and cannot be avoided. These are removed using the _complete.cases()_ function to subset the dataframe. A rule set is defined for **merged** and loaded from a text file to check for violations. Zero violations are observed in this case. Checking summary statistics for **merged** doesn't reveal any obvious inconsistencies (for instance, all percentages are between 0 and 1). 
+
+The structure of **rules.txt** is given below:
+
+\# numerical rules\
+gender.rate >= 0\
+gender.rate <= 100000\
+state.rate >= 0\
+state.rate <= 100000\
+Employed <= TotalPop\
+gender.pop <= TotalPop\
+Poverty >= 0\
+Poverty <= 1\
+ChildPoverty >= 0\
+ChildPoverty <= 1\
+Unemployment >= 0\
+Unemployment <= 1\
+ethnicity.pct >= 0\
+ethnicity.pct <= 1\
+employed.pct >= 0\
+employed.pct <= 1\
+gender.pct >= 0\
+gender.pct <= 1\
+
+\# categorical rules\
+gender %in% c('Male','Female')\
+
+
+```{r}
+# check NULLs
+colSums(is.na(merged))
+
+# retain only complete cases
+merged <- merged[complete.cases(merged), ]
+
+# load rules file and check for violations
+Rules <- editfile("rules.txt", type = "all")
+summary(violatedEdits(Rules, merged))
+
+summary(merged)
+
+```
+<br>
+<br>
+
+##	**Scan II**
+
+Boxplots are plotted for **gender**, **Cause of Death**, **Total Population**, **Poverty**, **Child Poverty**, **Unemployment**, **ethnicity.pct**, **employed.pct**, and **gender.pct** to view potential outliers.
+
+```{r}
+
+options(scipen=5)
+
+# subsetting dataset to make boxplots easier to see
+merged1 <- filter(merged, Cause.of.Death %in% c('All causes','Homicide','Firearm-related injury','Drug overdose','Chronic lower respiratory diseases','Suicide','Cancer'))
+merged2 <- filter(merged, Cause.of.Death %in% c('Alzheimer disease', 'Diabetes', 'Stroke', 'Parkinson disease', 'Heart disease', 'Unintentional injuries','Hypertension'))
+merged3 <- filter(merged, Cause.of.Death %in% c('Chronic liver disease and cirrhosis','Influenza and pneumonia','Septicemia','Kidney disease','Pneumonitis due to solids and liquids','Falls, ages 65 and over','HIV disease'))
+
+# boxplots to view outliers for causes of death 
+ggplot(merged1, aes(x=Cause.of.Death, y=state.rate)) + 
+  geom_boxplot() +
+  theme(axis.text = element_text(size = 5.5))  +
+  xlab("Cause of Death") +
+  ylab("State Death Rate")
+
+ggplot(merged2, aes(x=Cause.of.Death, y=state.rate)) + 
+  geom_boxplot() +
+  theme(axis.text = element_text(size = 5.5))  +
+  xlab("Cause of Death") +
+  ylab("State Death Rate")
+
+ggplot(merged3, aes(x=Cause.of.Death, y=state.rate)) + 
+  geom_boxplot() +
+  theme(axis.text = element_text(size = 5.5))  +
+  xlab("Cause of Death") +
+  ylab("State Death Rate")
+
+bx1 <- ggplot(merged, aes(y=merged$TotalPop)) + geom_boxplot() +  ylab("Total Population")
+bx2 <- ggplot(merged, aes(y=merged$Poverty)) + geom_boxplot() +  ylab("Poverty")
+bx3 <- ggplot(merged, aes(y=merged$ChildPoverty)) + geom_boxplot() +  ylab("Child Poverty")
+bx4 <- ggplot(merged, aes(y=merged$Unemployment)) + geom_boxplot() +  ylab("Unemployment")
+bx5 <- ggplot(merged, aes(y=merged$ethnicity.pct)) + geom_boxplot() +  ylab("% Ethnicity")
+bx6 <- ggplot(merged, aes(y=merged$employed.pct)) + geom_boxplot() +  ylab("% Employed")
+bx7 <- ggplot(merged, aes(y=merged$gender.pct)) + geom_boxplot() +  ylab("% Gender")
+bx8 <- ggplot(merged, aes(y=merged$gender.rate, x=merged$gender)) + geom_boxplot() +  ylab("Gender Rate") + xlab("Gender")
+
+ggarrange(bx1, bx2, bx3, bx4, bx5, bx6, bx7, bx8,
+          ncol = 4, nrow = 2)
+```
+
+If it was beneficial to remove the outliers from **merged**, it is possible to follow the method shown below. However, for this case, removing outliers would produce an inaccurate dataset (for instance, removing outliers from **TotalPop** would remove records corresponding to the most populous states). Therefore, the R code below is provided as a demonstration.
+
+```{r}
+
+# how outliers may be isolated using boxplot()
+bx <- boxplot(merged$TotalPop, plot=FALSE)
+merged %>% filter(., merged$TotalPop %in% bx$out)
+
+```
+<br>
+<br>
+
+##	**Transform **
+
+Plotting the histogram for **TotalPop** demonstrates that the variable is heavily right-skewed. To produce a more normal distribution, the _ln transform_ is applied and the result is seen to have a distribution that is more normal than prior to transformation.
+
+```{r}
+ggplot(merged, aes(x=TotalPop)) + geom_histogram(bins = 9) +  xlab("Total Population") +  ylab("Frequency")
+merged %<>% mutate(., ln_TotalPop = log(merged$TotalPop))
+ggplot(merged, aes(x=ln_TotalPop)) + geom_histogram(bins = 9) +  xlab("ln(Total Population)") +  ylab("Frequency")
+
+```
+<br>
+<br>
+
+## **References** 
+
+1. Centers for Disease Control and Prevention (2016) NCHS - VSRR Quarterly provisional estimates for selected indicators of mortality, Data.gov website, accessed 23 May 2023. https://catalog.data.gov/dataset/nchs-vsrr-quarterly-provisional-estimates-for-selected-indicators-of-mortality
+
+2. MuonNeutrino (2019) US Census Demographic Data, Kaggle website, accessed 23 May 2023. https://www.kaggle.com/datasets/muonneutrino/us-census-demographic-data?select=acs2017_county_data.csv

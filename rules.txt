@@ -1,0 +1,22 @@
+# numerical rules
+gender.rate >= 0
+gender.rate <= 100000
+state.rate >= 0
+state.rate <= 100000
+Employed <= TotalPop
+gender.pop <= TotalPop
+Poverty >= 0
+Poverty <= 1
+ChildPoverty >= 0
+ChildPoverty <= 1
+Unemployment >= 0
+Unemployment <= 1
+ethnicity.pct >= 0
+ethnicity.pct <= 1
+employed.pct >= 0
+employed.pct <= 1
+gender.pct >= 0
+gender.pct <= 1
+
+# categorical rules
+gender %in% c('Male','Female')
